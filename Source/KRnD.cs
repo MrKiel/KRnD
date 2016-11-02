@@ -43,6 +43,10 @@ namespace KRnD
         public const String PARACHUTE_STRENGTH = "parachuteStrength";
         public const String MAX_TEMPERATURE = "maxTemperature";
         public const String FUEL_CAPACITY = "fuelCapacity";
+        public const String BASE_PART_MASS = "basePartMass";
+        public const String RESOURCE_AMOUNTS = "resourceAmounts";
+        public const String TANK_MASS = "tankMass";
+        public const String RESOURCE_NAMES = "resourceNames";
 
         public override string ToString()
         {
@@ -140,12 +144,41 @@ namespace KRnD
         public float fairingAreaMass = 0;
         public Dictionary<String, double> fuelCapacities = null; // Resource-Name, capacity
         public double fuelCapacitiesSum = 0; // Sum of all fuel capacities
+        
+        // IFS Section
+        // IFS takes all it's info from delimited strings, so storing the resources in existing lists is possible, but makes reconstruction (for updating) much more difficult.
+        public bool hasIFSModule = false; // by default it doesn't have an InterstellarFuelSwitch Module
+        public String[] IFSResourceNames = null; // resourceNames - ';' separated. Multi-resource parts are further ',' separated
+        public String[] IFSResourceAmounts = null; // resourceAmounts - ';' separated. Multi-resource parts are further ',' separated
+        public double IFSbasePartMass = 0; // basePartMass, single value
+        public String[] IFStankMass = null; // tankMass. May not have multiple definitions, so check for count >1
 
         public PartStats(Part part)
         {
             this.mass = part.mass;
             this.skinMaxTemp = part.skinMaxTemp;
             this.intMaxTemp = part.maxTemp;
+
+            // Lets try to fetch an IFS Module
+            try
+            {
+                PartModule ifs = KRnD.getIFSModule(part);
+                // If found, set the local variables from the module's fields
+                if (ifs != null)
+                {
+                    this.hasIFSModule = true;
+                    char delim = ';';
+
+                    this.IFSResourceNames = KRnD.parseIFSField((String)ifs.Fields.GetValue(KRnDUpgrade.RESOURCE_NAMES), delim);
+                    this.IFSResourceAmounts = KRnD.parseIFSField((String)ifs.Fields.GetValue(KRnDUpgrade.RESOURCE_AMOUNTS), delim);
+                    this.IFSbasePartMass = Convert.ToDouble(ifs.Fields.GetValue(KRnDUpgrade.BASE_PART_MASS));
+                    this.IFStankMass = KRnD.parseIFSField((String)ifs.Fields.GetValue(KRnDUpgrade.TANK_MASS), delim);
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("[KRnD] : IFS Module Error: " + e.ToString());
+            }
 
             // There should only be one or the other, engines or RCS:
             List<ModuleEngines> engineModules = KRnD.getEngineModules(part);
@@ -280,6 +313,19 @@ namespace KRnD
             foreach (PartModule partModule in part.Modules)
             {
                 if (partModule.moduleName == "KRnDModule") return (KRnDModule)partModule;
+            }
+            return null;
+        }
+
+        // Just searched the target part for an IFS Module. You could just pass the modulename as a string and search for any module if you wanted to. 
+        public static PartModule getIFSModule(Part part)
+        {
+            foreach (PartModule partModule in part.Modules)
+            {
+                if (partModule.moduleName == "InterstellarFuelSwitch")
+                {
+                    return partModule;
+                }
             }
             return null;
         }
@@ -436,6 +482,118 @@ namespace KRnD
             String chargeString = chargeRate.ToString("0.####/s");
             String prefix = "<b>Electric Charge: </b>";
             return Regex.Replace(info, prefix + "[0-9.]+/[A-Za-z.]+", prefix + chargeString);
+        }
+
+        public static String[] parseIFSField(String s, char delim)
+        {
+            return s.Trim().Split(delim);
+        }
+
+        // Takes an array of strings (assumed to be numbers), multiplies each by a multiplier and returns as a single, correctly formatted string (for IFS Module Fields)
+        public static String fetchIFSUpgradedString(String[] s, float multiplier)
+        {
+            String r = "";
+            int i = 0;
+            while (i < s.Count())
+            {
+                // if it's a multi-resource value, split the string again
+                if (s[i].Contains(","))
+                {
+                    // split the string into an array
+                    String[] s2 = s[i].Split(',');
+                    String r2 = "";
+                    int j = 0;
+                    // multiply each element and append to a string (r2)
+                    while (j < s2.Count())
+                    {
+                        double x2 = Convert.ToDouble(s2[i]);
+                        r2 = r2 + (x2 * multiplier);
+                        // ',' delimit all but the last
+                        if (j < (s2.Count() - 1)) r2 = r2 + ",";
+                        j++;
+                    }
+
+                    // append the r2 string to the ; separated r string
+                    r = r + r2;
+                }
+                // when there are no ',' separated values
+                else
+                {
+                    // just convert and append the string to r
+                    double x = Convert.ToDouble(s[i]);
+                    r = r + (x * multiplier);
+                }
+                // ';' delimit all but the last
+                if (i < (s.Count() - 1)) r = r + ";";
+                i++;
+            }
+            // r should now contain a modified string with all individual ',' and ';' separated values mutliplied by 'multiplier'
+            return r;
+        }
+
+        // Another fetchIFSUpgraded string for resources
+        // Does the same as above, but checks the passed resources array for a valid resource before applying a multiplier
+        public static String fetchIFSUpgradedString(String[] resources, String[] resourceAmounts, double multiplier)
+        {
+            String r = "";
+            int i = 0;
+            while (i < resourceAmounts.Count())
+            {
+                // if it's a multi-resource value, split the string again
+                if (resourceAmounts[i].Contains(","))
+                {
+                    // split the string into an array
+                    String[] s2 = resourceAmounts[i].Split(',');
+                    String r2 = "";
+                    // split the resource name string too
+                    String[] resources2 = resources[i].Split(',');
+                    int j = 0;
+                    // multiply each element and append to a string (r2)
+                    while (j < s2.Count())
+                    {
+                        // If this is a valid fuel resource
+                        if (KRnD.fuelResources.Contains(resources2[j]))
+                        {
+                            // convert and append string
+                            double x2 = Convert.ToDouble(s2[j]);
+                            r2 = r2 + Math.Round(x2 * multiplier);
+                        }
+                        // if not, just append the original string (no changes)
+                        else
+                        {
+                            r2 = r2 + s2[j];
+                        }
+                        
+                        // ',' delimit all but the last
+                        if (j < (s2.Count() - 1)) r2 = r2 + ",";
+                        j++;
+                    }
+
+                    // append the r2 string to the ; separated r string
+                    r = r + r2;
+                }
+                // when there are no ',' separated values
+                else
+                {
+                    // check it's a valid fuel resource
+                    if (KRnD.fuelResources.Contains(resources[i]))
+                    {
+                        // convert and append the string to r
+                        double x = Convert.ToDouble(resourceAmounts[i]);
+                        r = r + Math.Round(x * multiplier);
+                    }
+                    // if not, append the original string (no changes)
+                    else
+                    {
+                        r = r + resourceAmounts[i];
+                    }
+                }
+                // ';' delimit all but the last
+                if (i < (resourceAmounts.Count() - 1)) r = r + ";";
+                i++;
+            }
+            // r should now contain a modified string with all individual ',' and ';' separated values mutliplied by 'multiplier'
+            return r;
         }
 
         // Updates the global dictionary of available parts with the current set of upgrades (should be
@@ -630,7 +788,16 @@ namespace KRnD
 
                 // Get the original part-stats:
                 PartStats originalStats;
-                if (!KRnD.originalStats.TryGetValue(partName, out originalStats)) throw new Exception("no original-stats for part '" + partName + "'");
+                if (!KRnD.originalStats.TryGetValue(partName, out originalStats)) throw new Exception("no original-stats for part '" + partName + "', " + upgradesToApply);
+
+                // Does this part have an Interstellar Fuel Switch Module?
+                bool IFSPresent = false;
+                PartModule partIFSModule = null;
+                if (originalStats.hasIFSModule)
+                {
+                    partIFSModule = getIFSModule(part);
+                    IFSPresent = true;
+                }
 
                 KRnDUpgrade latestModel;
                 if (!KRnD.upgrades.TryGetValue(partName, out latestModel)) latestModel = null;
@@ -641,6 +808,14 @@ namespace KRnD
                 float dryMassFactor = 1 + KRnD.calculateImprovementFactor(rndModule.dryMass_improvement, rndModule.dryMass_improvementScale, upgradesToApply.dryMass);
                 part.mass = originalStats.mass * dryMassFactor;
                 part.prefabMass = part.mass; // New in ksp 1.1, if this is correct is just guesswork however...
+
+                // Dry Mass for IFS
+                if (IFSPresent)
+                {
+                    // update the tank masses and the base part mass
+                    partIFSModule.Fields.SetValue(KRnDUpgrade.BASE_PART_MASS, Convert.ToSingle(originalStats.IFSbasePartMass * dryMassFactor));
+                    partIFSModule.Fields.SetValue(KRnDUpgrade.TANK_MASS, fetchIFSUpgradedString(originalStats.IFStankMass, dryMassFactor));
+                }
 
                 // Dry Mass also improves fairing mass:
                 ModuleProceduralFairing fairngModule = KRnD.getFairingModule(part);
@@ -859,6 +1034,18 @@ namespace KRnD
                     rndModule.fuelCapacity_upgrades = 0;
                 }
 
+                // IFS Module Fuel Capacity - we'll keep this separate from the Fuel Capacity code above, to avoid confusion
+                if (IFSPresent)
+                {
+                    rndModule.fuelCapacity_upgrades = upgradesToApply.fuelCapacity;
+                    double improvementFactor = (1 + KRnD.calculateImprovementFactor(rndModule.fuelCapacity_improvement, rndModule.fuelCapacity_improvementScale, upgradesToApply.fuelCapacity));
+                    
+                    // This line sets all valid fuels (as determind by KRND.fuelresources) in the IFS resource amounts to the upgraded amounts
+                    partIFSModule.Fields.SetValue(KRnDUpgrade.RESOURCE_AMOUNTS, fetchIFSUpgradedString(originalStats.IFSResourceNames, originalStats.IFSResourceAmounts, improvementFactor));
+
+                    // IFS Needs to ReInitialize at this point to refresh it's GUI and data.
+
+                }
             }
             catch (Exception e)
             {

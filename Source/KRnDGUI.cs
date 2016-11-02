@@ -380,6 +380,7 @@ namespace KRnD
                 ModuleParachute parachuteModule = KRnD.getParachuteModule(part);
                 ModuleProceduralFairing fairingModule = KRnD.getFairingModule(part);
                 List<PartResource> fuelResources = KRnD.getFuelResources(part);
+                PartModule IFSModule = KRnD.getIFSModule(part);
 
                 // Basic stats:
                 info = "<color=#FFFFFF><b>Dry Mass:</b> "+ part.mass.ToString("0.#### t") +"\n";
@@ -396,6 +397,20 @@ namespace KRnD
                         String fuelName = fuelResource.resourceName.ToString();
                         fuelName = Regex.Replace(fuelName, @"([a-z])([A-Z])", "$1 $2");
                         info += "<b>" + fuelName + ":</b> " + fuelResource.maxAmount.ToString() + "\n";
+                    }
+                }
+                // IFS Fuels
+                if (IFSModule != null)
+                {
+                    int i = 0;
+                    String[] ifsResourceNames = KRnD.parseIFSField((String)IFSModule.Fields.GetValue(KRnDUpgrade.RESOURCE_NAMES), ';');
+                    String[] ifsResourceAmounts = KRnD.parseIFSField((String)IFSModule.Fields.GetValue(KRnDUpgrade.RESOURCE_AMOUNTS), ';');
+                    foreach (String ifsResource in ifsResourceNames)
+                    {
+                        String fuelName = ifsResource;
+                        fuelName = Regex.Replace(fuelName, @"([a-z])([A-Z])", "$1 $2");
+                        info += "<b>IFS: " + fuelName + ":</b> " + ifsResourceAmounts[i] + "\n";
+                        i++;
                     }
                 }
 
@@ -494,6 +509,9 @@ namespace KRnD
                 List<ModuleResourceConverter> converterModules = null;
                 ModuleParachute parachuteModule = null;
                 List<PartResource> fuelResources = null;
+                String[] IFSResourceNames = null;
+                String[] IFSResourceAmounts = null;
+
                 if (selectedPart != null)
                 {
                     foreach (AvailablePart aPart in PartLoader.LoadedPartsList)
@@ -518,6 +536,12 @@ namespace KRnD
                         converterModules = KRnD.getConverterModules(part);
                         parachuteModule = KRnD.getParachuteModule(part);
                         fuelResources = KRnD.getFuelResources(part);
+                        PartModule ifsModule = KRnD.getIFSModule(part);
+                        if (ifsModule != null)
+                        {
+                            IFSResourceNames = KRnD.parseIFSField((String)ifsModule.Fields.GetValue(KRnDUpgrade.RESOURCE_NAMES), ';');
+                            IFSResourceAmounts = KRnD.parseIFSField((String)ifsModule.Fields.GetValue(KRnDUpgrade.RESOURCE_AMOUNTS), ';');
+                        }
                     }
                 }
                 if (!part)
@@ -586,7 +610,7 @@ namespace KRnD
                 {
                     options.Add("Battery");
                 }
-                if (fuelResources != null)
+                if (fuelResources != null || IFSResourceNames != null)
                 {
                     options.Add("Fuel Pressure");
                 }
